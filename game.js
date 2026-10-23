@@ -9,6 +9,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 const $ = (id) => document.getElementById(id);
 const WHEELBASE = 7.73, TRACK = 2.32, FRONT_X = 3.88, REAR_X = -3.85, LAT = 1.16, WHEEL_R = 0.66;
 const MOUSE_SENS = 0.0025;          // radians per pixel
+const MAX_FORWARD_SPEED = 200 / 3.6; // 200 km/h, converted to metres per second
 const RECENTER_AFTER = 1.0;         // seconds without mouse movement before the camera returns behind the bus
 const CAM_MIN_H = 1.2;              // metres the camera keeps above the ground
 const SIDE = -2.8;                  // chase camera sits a little to the right of the bus
@@ -210,15 +211,15 @@ function drive(dt) {
   bus.brake += (brakeTarget - bus.brake) * ease(dt, 4);
   const wanted = brakeTarget ? 0.0 : demand;
   bus.throttle += (wanted - bus.throttle) * ease(dt, 1.5);
-  const engine = bus.throttle * 1.15 / (1 + (Math.abs(bus.speed) / 11) ** 2);
-  const resistance = Math.abs(bus.speed) > 0.02 ? Math.sign(bus.speed) * (0.08 + 0.001 * bus.speed * bus.speed) : 0;
+  const engine = bus.throttle * 3.0 / (1 + (Math.abs(bus.speed) / 55) ** 2);
+  const resistance = Math.abs(bus.speed) > 0.02 ? Math.sign(bus.speed) * (0.08 + 0.00025 * bus.speed * bus.speed) : 0;
   const braking = Math.abs(bus.speed) > 0.01 ? Math.sign(bus.speed) * bus.brake * 2.6 : 0;
   const grade = Math.abs(bus.speed) > 0.3 ? -9.81 * Math.sin(bus.pitch) * 0.35 : 0;   // hills
   const desired = engine - resistance - braking - grade;
   const jerk = bus.brake > 0.1 ? 2.2 : 1.1;
   bus.acceleration += clamp(desired - bus.acceleration, -jerk * dt, jerk * dt);
   const before = bus.speed;
-  bus.speed = clamp(bus.speed + bus.acceleration * dt, -2.5, 25);
+  bus.speed = clamp(bus.speed + bus.acceleration * dt, -2.5, MAX_FORWARD_SPEED);
   if ((bus.brake > 0.1 && before * bus.speed < 0) || (brakeTarget && Math.abs(bus.speed) < 0.04)) {
     bus.speed = 0; bus.acceleration = 0;
   }
