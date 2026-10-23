@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Accra–Kumasi Bus</title>
+<meta name="description" content="Drive an STC intercity coach from Accra to Kumasi on the N6 highway, right in your browser.">
+<meta property="og:title" content="Accra–Kumasi Bus">
+<meta property="og:description" content="Drive an STC intercity coach from Accra to Kumasi on the N6 highway, right in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='6' y='12' width='52' height='36' rx='8' fill='%23f4f4f4' stroke='%23146b3a' stroke-width='4'/%3E%3Crect x='12' y='18' width='40' height='12' rx='2' fill='%2338516a'/%3E%3Crect x='6' y='38' width='52' height='6' fill='%2349b648'/%3E%3Ccircle cx='18' cy='50' r='6' fill='%23222'/%3E%3Ccircle cx='46' cy='50' r='6' fill='%23222'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --green: #0f7a3d; --gold: #f2b705; --red: #d62f2f; --ink: #10151b;
+    --panel: rgba(12, 17, 23, 0.72); --text: #f4f6f8; --muted: #b9c2cc;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a9cbea; color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  .panel { background: var(--panel); border-radius: 10px; backdrop-filter: blur(6px); }
+
+  #hud { position: fixed; inset: 0; pointer-events: none; display: none; }
+  #route { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: min(560px, 70vw);
+    padding: 8px 14px 10px; }
+  #route .ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+  #route .track { position: relative; height: 6px; margin-top: 6px; background: rgba(255,255,255,.18); border-radius: 3px; }
+  #route .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--gold); border-radius: 3px; }
+  #route .tick { position: absolute; top: -3px; width: 2px; height: 12px; background: rgba(255,255,255,.55); }
+  #route .tick.served { background: #6fe39a; } #route .tick.missed { background: #ff7a7a; }
+  #route .me { position: absolute; top: -6px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%;
+    background: var(--text); border: 3px solid var(--green); }
+
+  #stop { position: absolute; top: 14px; left: 14px; padding: 10px 14px; min-width: 210px; }
+  #stop .label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  #stop .name { font-size: 22px; font-weight: 700; margin-top: 2px; }
+  #stop .dist { font-size: 14px; color: var(--gold); margin-top: 2px; }
+  #stop .count { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  #clock { position: absolute; top: 14px; right: 14px; padding: 10px 14px; text-align: right; }
+  #clock .t { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #clock .sub { font-size: 12px; color: var(--muted); }
+
+  #speedo { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 8px 22px 10px;
+    text-align: center; }
+  #speedo .v { font-size: 46px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  #speedo .u { font-size: 12px; color: var(--muted); letter-spacing: .1em; }
+  #speedo .gear { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 5px; font-size: 13px;
+    font-weight: 700; background: var(--green); vertical-align: middle; }
+  #speedo .gear.r { background: var(--red); }
+
+  #keys { position: absolute; bottom: 18px; left: 14px; padding: 10px 12px; font-size: 12px; line-height: 1.7; color: var(--muted); }
+  #keys b { color: var(--text); font-weight: 600; }
+  #hint { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); font-size: 13px; color: var(--text);
+    padding: 6px 12px; display: none; }
+
+  #toast { position: fixed; top: 92px; left: 50%; transform: translateX(-50%); padding: 12px 22px; font-size: 20px;
+    font-weight: 700; text-align: center; opacity: 0; transition: opacity .4s; pointer-events: none; }
+  #toast small { display: block; font-size: 13px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: radial-gradient(ellipse at center, rgba(10,30,20,.55), rgba(5,10,15,.85)); }
+  #card { width: min(560px, 100%); padding: 28px 28px 24px; background: rgba(12,17,23,.88); border-radius: 14px;
+    border-top: 5px solid var(--green); box-shadow: 0 20px 60px rgba(0,0,0,.45); }
+  #card h1 { margin: 0; font-size: 30px; letter-spacing: .01em; }
+  #card h1 span { color: var(--gold); }
+  #card .tag { margin: 6px 0 18px; color: var(--muted); font-size: 15px; }
+  .flag { display: flex; height: 5px; border-radius: 3px; overflow: hidden; margin-bottom: 18px; }
+  .flag i { flex: 1; } .flag i:nth-child(1) { background: var(--red); } .flag i:nth-child(2) { background: var(--gold); }
+  .flag i:nth-child(3) { background: var(--green); }
+  #load { height: 8px; background: rgba(255,255,255,.12); border-radius: 4px; overflow: hidden; }
+  #load div { height: 100%; width: 0; background: var(--gold); transition: width .2s; }
+  #loadtxt { font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 16px; }
+  #controls { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 14px; margin: 16px 0 20px; color: var(--muted); }
+  #controls b { color: var(--text); font-weight: 600; white-space: nowrap; }
+  #play { width: 100%; padding: 14px; font-size: 18px; font-weight: 700; color: var(--ink); background: var(--gold);
+    border: 0; border-radius: 10px; cursor: pointer; }
+  #play:disabled { opacity: .45; cursor: default; }
+  #play:not(:disabled):hover { filter: brightness(1.08); }
+  #err { color: #ff9a9a; font-size: 14px; margin-top: 12px; display: none; }
+
+  /* ---------- mobile console (shown on touch screens, or with ?mobile in the address) ---------- */
+  #console { display: none; position: fixed; inset: 0; pointer-events: none; }
+  #console * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  #console button, #wheel { pointer-events: auto; touch-action: none; }
+  #wheel { position: fixed; left: max(14px, env(safe-area-inset-left)); bottom: 14px; width: 150px; height: 150px;
+    border-radius: 50%; background: rgba(12,17,23,.35); }
+  #wheel svg { width: 100%; height: 100%; transition: transform .08s linear; }
+  #wheel .hint { position: absolute; left: 0; right: 0; bottom: -2px; text-align: center; font-size: 10px;
+    letter-spacing: .1em; color: rgba(255,255,255,.75); }
+  .pedals { position: fixed; right: max(14px, env(safe-area-inset-right)); bottom: 14px; display: flex; gap: 10px;
+    align-items: flex-end; }
+  .pedal { border: 0; border-radius: 14px; color: #fff; font-weight: 800; letter-spacing: .06em; font-size: 13px;
+    box-shadow: inset 0 -6px 0 rgba(0,0,0,.25); }
+  #brake { width: 82px; height: 92px; background: rgba(214,47,47,.78); }
+  #gas { width: 82px; height: 132px; background: rgba(15,122,61,.82); }
+  .pedal.on { transform: translateY(3px) scale(.97); box-shadow: inset 0 -2px 0 rgba(0,0,0,.25); filter: brightness(1.15); }
+  #gearbox { display: flex; flex-direction: column; gap: 6px; }
+  .gearbtn { width: 50px; height: 44px; border: 2px solid rgba(255,255,255,.35); border-radius: 10px; font-size: 18px;
+    font-weight: 800; color: #fff; background: rgba(12,17,23,.55); }
+  .gearbtn.sel { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+  .gearbtn.sel.r { background: var(--red); color: #fff; border-color: var(--red); }
+  #tools { position: fixed; right: max(14px, env(safe-area-inset-right)); top: 96px; display: flex; flex-direction: column; gap: 8px; }
+  #tools button { width: 58px; height: 40px; border: 0; border-radius: 10px; background: rgba(12,17,23,.62); color: #fff;
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; }
+  #tools button.off { color: var(--muted); text-decoration: line-through; }
+  body.touch #keys, body.touch #hint { display: none !important; }
+  body.touch #stop { min-width: 0; max-width: 42vw; padding: 7px 10px; }
+  body.touch #stop .name { font-size: 16px; } body.touch #stop .label, body.touch #stop .count { font-size: 10px; }
+  body.touch #clock { padding: 7px 10px; } body.touch #clock .t { font-size: 17px; }
+  body.touch #route { top: 12px; width: min(300px, 34vw); padding: 6px 10px 8px; }
+  body.touch #route .ends { font-size: 10px; }
+  body.touch #speedo { bottom: 14px; padding: 6px 14px; } body.touch #speedo .v { font-size: 30px; }
+  body.touch #toast { top: 70px; font-size: 15px; width: max-content; max-width: 70vw; }
+  @media (orientation: portrait) {
+    body.touch #route { top: auto; bottom: 178px; width: calc(100vw - 28px); }
+    body.touch #speedo { bottom: auto; top: 86px; }
+    body.touch #tools { top: auto; bottom: 230px; }
+    body.touch #toast { top: 150px; }
+  }
+  @media (max-width: 440px) {
+    body.touch #wheel { width: 118px; height: 118px; }
+    body.touch .pedals { gap: 7px; } body.touch .gearbtn { width: 44px; height: 40px; }
+    body.touch #brake { width: 68px; height: 78px; } body.touch #gas { width: 68px; height: 112px; }
+  }
+  @media (max-height: 420px) {
+    body.touch #wheel { width: 128px; height: 128px; }
+    body.touch #gas { height: 112px; } body.touch #brake { height: 80px; }
+    body.touch #tools { top: 66px; } body.touch #tools button { height: 34px; }
+  }
+  @media (max-width: 700px) {
+    #keys { display: none; }
+    #stop { min-width: 0; max-width: 44vw; padding: 8px 10px; } #stop .name { font-size: 16px; }
+    #clock { padding: 8px 10px; } #clock .t { font-size: 17px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="route" class="panel">
+    <div class="ends"><span>ACCRA</span><span id="progtxt"></span><span>KUMASI</span></div>
+    <div class="track" id="track"><div class="fill" id="fill"></div><div class="me" id="me"></div></div>
+  </div>
+  <div id="stop" class="panel">
+    <div class="label">Next stop</div>
+    <div class="name" id="stopname">–</div>
+    <div class="dist" id="stopdist"></div>
+    <div class="count" id="stopcount"></div>
+  </div>
+  <div id="clock" class="panel"><div class="t" id="time">0:00</div><div class="sub" id="place">Accra</div></div>
+  <div id="speedo" class="panel"><span class="v" id="kmh">0</span><span class="gear" id="gear">D</span><div class="u">KM/H</div></div>
+  <div id="keys" class="panel">
+    <b>W / ↑</b> drive &nbsp; <b>S / ↓</b> brake, reverse<br>
+    <b>A D / ← →</b> steer &nbsp; <b>Space</b> brake<br>
+    <b>Mouse</b> look &nbsp; <b>Wheel</b> zoom &nbsp; <b>C</b> camera behind<br>
+    <b>V</b> driver view &nbsp; <b>R</b> back on road &nbsp; <b>M</b> sound
+  </div>
+  <div id="hint" class="panel">Click to look around with the mouse</div>
+</div>
+<div id="toast" class="panel"></div>
+
+<div id="overlay">
+  <div id="card">
+    <div class="flag"><i></i><i></i><i></i></div>
+    <h1>Accra <span>→</span> Kumasi</h1>
+    <div class="tag">Drive the STC intercity coach up the N6. Pick up passengers at every town and bring them to Kumasi.</div>
+    <div id="load"><div id="loadbar"></div></div>
+    <div id="loadtxt">Loading the road…</div>
+    <div id="controls">
+      <b>W / ↑ · S / ↓</b><span>accelerate · brake, then reverse</span>
+      <b>A D / ← →</b><span>steer</span>
+      <b>Space</b><span>brake</span>
+      <b>Mouse · Wheel</b><span>look around the bus · zoom (it swings back behind you)</span>
+      <b>V · C · R</b><span>driver view · camera behind · back on the road</span>
+      <b>Bus stops</b><span>stop in the lay-by at the blue shelter until passengers board</span>
+    </div>
+    <button id="play" disabled>Loading…</button>
+    <div id="err"></div>
+  </div>
+</div>
+
+<div id="console">
+  <div id="wheel">
+    <svg id="wheelsvg" viewBox="0 0 100 100" aria-hidden="true">
+      <circle cx="50" cy="50" r="42" fill="none" stroke="#e9edf1" stroke-width="9"/>
+      <circle cx="50" cy="50" r="42" fill="none" stroke="#1d242c" stroke-width="3" stroke-dasharray="6 10"/>
+      <path d="M50 50 L12 46 M50 50 L88 46 M50 50 L50 90" stroke="#e9edf1" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="50" cy="50" r="13" fill="#0f7a3d" stroke="#e9edf1" stroke-width="3"/>
+      <text x="50" y="54" text-anchor="middle" font-size="10" font-weight="800" fill="#fff" font-family="Arial">STC</text>
+      <rect x="47" y="5" width="6" height="9" rx="2" fill="#f2b705"/>
+    </svg>
+    <div class="hint">DRAG TO STEER</div>
+  </div>
+  <div class="pedals">
+    <div id="gearbox"><button class="gearbtn sel" id="gearD">D</button><button class="gearbtn r" id="gearR">R</button></div>
+    <button class="pedal" id="brake">BRAKE</button>
+    <button class="pedal" id="gas">GAS</button>
+  </div>
+  <div id="tools">
+    <button id="tView">VIEW</button><button id="tCam">CAM</button><button id="tRoad">ROAD</button><button id="tSound">SOUND</button>
+  </div>
+</div>
+
+<script type="module" src="game.js"></script>
+</body>
+</html>
