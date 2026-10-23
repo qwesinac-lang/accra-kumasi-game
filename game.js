@@ -140,10 +140,97 @@ class HeightGrid {
   }
 }
 
+// Test a bus-sized rectangle against a building triangle at the bus's height.
+function buildingTriangleHitsBus(t, x, y, z, yaw) {
+  if (t.maxZ < z + 0.25 || t.minZ > z + 3.9) return false;
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const extentX = 6.6 * Math.abs(c) + 1.45 * Math.abs(s);
+  const extentY = 6.6 * Math.abs(s) + 1.45 * Math.abs(c);
+  if (t.minX > x + extentX || t.maxX < x - extentX ||
+      t.minY > y + extentY || t.maxY < y - extentY) return false;
+  const points = t.points.map((p) => {
+    const dx = p.x - x, dy = p.y - y;
+    return [dx * c + dy * s, -dx * s + dy * c];
+  });
+  const axes = [[1, 0], [0, 1]];
+  for (let i = 0; i < 3; i++) {
+    const a = points[i], b = points[(i + 1) % 3];
+    axes.push([a[1] - b[1], b[0] - a[0]]);
+  }
+  for (const [ax, ay] of axes) {
+    const projected = points.map(([px, py]) => px * ax + py * ay);
+    const radius = 6.6 * Math.abs(ax) + 1.45 * Math.abs(ay);
+    if (Math.min(...projected) > radius || Math.max(...projected) < -radius) return false;
+  }
+  return true;
+}
+
+class BuildingCollisions {
+  constructor(meshes = []) {
+    this.cells = new Map();
+    this.triangles = [];
+    for (const mesh of meshes) {
+      mesh.updateWorldMatrix(true, false);
+      const pos = mesh.geometry.attributes.position, idx = mesh.geometry.index;
+      const count = idx ? idx.count : pos.count;
+      const vertex = new THREE.Vector3();
+      for (let i = 0; i < count; i += 3) {
+        const points = [];
+        for (let j = 0; j < 3; j++) {
+          vertex.fromBufferAttribute(pos, idx ? idx.getX(i + j) : i + j).applyMatrix4(mesh.matrixWorld);
+          points.push({ x: vertex.x, y: -vertex.z, z: vertex.y });
+        }
+        this.addTriangle(points);
+      }
+    }
+  }
+
+  addTriangle(points) {
+    const id = this.triangles.length;
+    this.triangles.push({ points,
+      minX: Math.min(...points.map(p => p.x)), maxX: Math.max(...points.map(p => p.x)),
+      minY: Math.min(...points.map(p => p.y)), maxY: Math.max(...points.map(p => p.y)),
+      minZ: Math.min(...points.map(p => p.z)), maxZ: Math.max(...points.map(p => p.z)) });
+    const x0 = Math.floor(Math.min(...points.map(p => p.x)) / 32);
+    const x1 = Math.floor(Math.max(...points.map(p => p.x)) / 32);
+    const y0 = Math.floor(Math.min(...points.map(p => p.y)) / 32);
+    const y1 = Math.floor(Math.max(...points.map(p => p.y)) / 32);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+      const key = `${x},${y}`;
+      if (!this.cells.has(key)) this.cells.set(key, []);
+      this.cells.get(key).push(id);
+    }
+  }
+
+  blocksMove(from, to) {
+    const candidates = new Set();
+    const x0 = Math.floor((Math.min(from.x, to.x) - 7) / 32);
+    const x1 = Math.floor((Math.max(from.x, to.x) + 7) / 32);
+    const y0 = Math.floor((Math.min(from.y, to.y) - 7) / 32);
+    const y1 = Math.floor((Math.max(from.y, to.y) + 7) / 32);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+      for (const id of this.cells.get(`${x},${y}`) || []) candidates.add(id);
+    }
+    if (!candidates.size) return false;
+    const turn = wrap(to.yaw - from.yaw);
+    // Sweep the entire body, including turning corners, so even 400 km/h cannot skip a wall.
+    const steps = Math.max(1, Math.ceil((Math.hypot(to.x - from.x, to.y - from.y) + 7 * Math.abs(turn)) / 0.25));
+    for (let i = 1; i <= steps; i++) {
+      const f = i / steps;
+      for (const id of candidates) {
+        if (buildingTriangleHitsBus(this.triangles[id],
+          from.x + (to.x - from.x) * f, from.y + (to.y - from.y) * f,
+          from.z + (to.z - from.z) * f, from.yaw + turn * f)) return true;
+      }
+    }
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------- loading
 const draco = new DRACOLoader().setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/gltf/');
 const loader = new GLTFLoader().setDRACOLoader(draco);
-let grid, route, busNodes, lane, stops, towns, spawns;
+let grid, buildings, route, busNodes, lane, stops, towns, spawns;
 
 async function load() {
   const manifest = await (await fetch('assets/manifest.json')).json();
@@ -163,7 +250,7 @@ async function load() {
   $('loadtxt').textContent = 'Preparing the road surface…';
   await new Promise((r) => setTimeout(r, 30));
 
-  const ground = [];
+  const ground = [], buildingMeshes = [];
   for (const [name, root] of Object.entries(layers)) {
     scene.add(root);
     root.traverse((o) => {
@@ -182,10 +269,12 @@ async function load() {
         }
       }
       if ((name === 'road' || name === 'terrain') && /(^|\|)(Road_\d|Road_Furniture|Terminals|Terrain_)/.test(chain)) ground.push(o);
+      if (name === 'town' && /Buildings_/.test(chain)) buildingMeshes.push(o);
       if (!isBus) { o.matrixAutoUpdate = false; o.updateMatrix(); }
     });
   }
   grid = new HeightGrid(ground);
+  buildings = new BuildingCollisions(buildingMeshes);
 
   const bus = layers.bus;
   const node = (n) => bus.getObjectByName(n);
@@ -265,14 +354,15 @@ function drive(dt) {
   yaw += omega * dt;
   const nx = rx + 3.85 * Math.cos(yaw), ny = ry + 3.85 * Math.sin(yaw);
   const pose = groundPose(nx, ny, yaw, bus.z);
-  if (pose) {
+  const blocked = pose && buildings.blocksMove(bus, { x: nx, y: ny, z: pose.z, yaw });
+  if (pose && !blocked) {
     Object.assign(bus, { x: nx, y: ny, yaw });
     const f = ease(dt, 14);
     bus.z += (pose.z - bus.z) * f;
     bus.pitch += (pose.pitch - bus.pitch) * f;
     bus.roll += (pose.roll - bus.roll) * f;
   } else {
-    bus.speed = 0; bus.acceleration = 0;      // edge of the world
+    bus.speed = 0; bus.acceleration = 0; bus.throttle = 0; // solid building or edge of the world
   }
   for (const [k] of WHEEL_POS) {
     const lateral = k.endsWith('L') ? LAT : -LAT, longitudinal = k.startsWith('F') ? WHEELBASE : 0;
