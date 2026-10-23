@@ -9,7 +9,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 const $ = (id) => document.getElementById(id);
 const WHEELBASE = 7.73, TRACK = 2.32, FRONT_X = 3.88, REAR_X = -3.85, LAT = 1.16, WHEEL_R = 0.66;
 const MOUSE_SENS = 0.0025;          // radians per pixel
-const MAX_FORWARD_SPEED = 200 / 3.6; // 200 km/h, converted to metres per second
+const MAX_FORWARD_SPEED = 400 / 3.6; // 400 km/h, converted to metres per second
 const RECENTER_AFTER = 1.0;         // seconds without mouse movement before the camera returns behind the bus
 const CAM_MIN_H = 1.2;              // metres the camera keeps above the ground
 const SIDE = -2.8;                  // chase camera sits a little to the right of the bus
@@ -47,6 +47,33 @@ Object.assign(sun.shadow.camera, { left: -80, right: 80, top: 80, bottom: -80, n
 sun.shadow.bias = -0.0005;
 sun.shadow.normalBias = 0.5;
 scene.add(sun, sun.target);
+
+// Puffy clouds share one geometry and draw call to keep the phone version light.
+const cloudCount = 32, puffsPerCloud = 5;
+const clouds = new THREE.InstancedMesh(
+  new THREE.SphereGeometry(1, 10, 7),
+  new THREE.MeshLambertMaterial({ color: 0xffffff, fog: false }),
+  cloudCount * puffsPerCloud
+);
+clouds.name = 'Overhead clouds';
+const cloudPuff = new THREE.Object3D();
+for (let i = 0; i < cloudCount; i++) {
+  const angle = i * 2.399963, radius = 900 + (i % 7) * 160;
+  const cx = Math.cos(angle) * radius, cz = Math.sin(angle) * radius;
+  const cy = 95 + (i % 5) * 12, size = 0.8 + (i % 4) * 0.18;
+  for (let j = 0; j < puffsPerCloud; j++) {
+    cloudPuff.position.set(cx + (j - 2) * 31 * size,
+      cy + (j === 2 ? 16 : j % 2 ? 7 : 0) * size,
+      cz + Math.sin(j * 2 + i) * 13 * size);
+    cloudPuff.scale.set((36 + (j % 3) * 9) * size,
+      (18 + (j === 2 ? 14 : 4)) * size, 35 * size);
+    cloudPuff.updateMatrix();
+    clouds.setMatrixAt(i * puffsPerCloud + j, cloudPuff.matrix);
+  }
+}
+clouds.instanceMatrix.needsUpdate = true;
+clouds.computeBoundingSphere();
+scene.add(clouds);
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -211,12 +238,12 @@ function drive(dt) {
   bus.brake += (brakeTarget - bus.brake) * ease(dt, 4);
   const wanted = brakeTarget ? 0.0 : demand;
   bus.throttle += (wanted - bus.throttle) * ease(dt, 1.5);
-  const engine = bus.throttle * 3.0 / (1 + (Math.abs(bus.speed) / 55) ** 2);
+  const engine = bus.throttle * 14.0 / (1 + (Math.abs(bus.speed) / 110) ** 2);
   const resistance = Math.abs(bus.speed) > 0.02 ? Math.sign(bus.speed) * (0.08 + 0.00025 * bus.speed * bus.speed) : 0;
-  const braking = Math.abs(bus.speed) > 0.01 ? Math.sign(bus.speed) * bus.brake * 2.6 : 0;
+  const braking = Math.abs(bus.speed) > 0.01 ? Math.sign(bus.speed) * bus.brake * 14.0 : 0;
   const grade = Math.abs(bus.speed) > 0.3 ? -9.81 * Math.sin(bus.pitch) * 0.35 : 0;   // hills
   const desired = engine - resistance - braking - grade;
-  const jerk = bus.brake > 0.1 ? 2.2 : 1.1;
+  const jerk = bus.brake > 0.1 ? 20.0 : 6.0;
   bus.acceleration += clamp(desired - bus.acceleration, -jerk * dt, jerk * dt);
   const before = bus.speed;
   bus.speed = clamp(bus.speed + bus.acceleration * dt, -2.5, MAX_FORWARD_SPEED);
@@ -612,6 +639,8 @@ function step(dt, now) {
   }
   poseBus();
   updateCamera(dt, now);
+  clouds.position.copy(camera.position);
+  clouds.rotation.y = now * 0.002;
   const p = v3(bus.x, bus.y, bus.z);
   sun.position.copy(p).addScaledVector(SUN_DIR, 300);
   sun.target.position.copy(p);
